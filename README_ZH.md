@@ -4,7 +4,6 @@
 - 标准 JSON
 - Markdown 包装的 JSON
 - 格式错误的 JSON（自动修复）
-- 单个字符串中的多个 JSON 对象
 
 ## 特性
 
@@ -21,7 +20,7 @@ package main
 
 import (
     "fmt"
-    "your-module/universal_parser"
+    "your-module/parser"
 )
 
 // 定义你的结构体
@@ -33,7 +32,7 @@ type User struct {
 func main() {
     // 解析标准 JSON
     jsonStr := `{"name": "张三", "age": 30}`
-    user, err := UniversalJSONParser[User](jsonStr)
+    user, err := Parse[User](jsonStr)
     if err != nil {
         panic(err)
     }
@@ -41,7 +40,7 @@ func main() {
     
     // 解析 markdown JSON
     markdownStr := "```json\n{\"name\": \"李四\", \"age\": 25}\n```"
-    user2, err := UniversalJSONParser[User](markdownStr)
+    user2, err := Parse[User](markdownStr)
     if err != nil {
         panic(err)
     }
@@ -49,7 +48,7 @@ func main() {
     
     // 解析格式错误的 JSON
     malformedStr := `{name: "王五", age: 35}`
-    user3, err := UniversalJSONParser[User](malformedStr)
+    user3, err := Parse[User](malformedStr)
     if err != nil {
         panic(err)
     }
@@ -59,12 +58,12 @@ func main() {
 
 ## API 参考
 
-### UniversalJSONParser[T]
+### Parse[T]
 
 将 JSON 解析为任意类型 T。
 
 ```go
-func UniversalJSONParser[T any](input string) (T, error)
+func Parse[T any](input string) (T, error)
 ```
 
 **参数:**
@@ -72,21 +71,6 @@ func UniversalJSONParser[T any](input string) (T, error)
 
 **返回:**
 - 类型为 T 的解析对象
-- 如果解析失败则返回错误
-
-### ParseMultipleJSON[T]
-
-从字符串中解析多个 JSON 对象。
-
-```go
-func ParseMultipleJSON[T any](input string) ([]T, error)
-```
-
-**参数:**
-- `input`: 包含多个 JSON 对象的字符串
-
-**返回:**
-- 解析对象的切片
 - 如果解析失败则返回错误
 
 ## 支持的格式
@@ -110,13 +94,12 @@ func ParseMultipleJSON[T any](input string) ([]T, error)
 
 ## 示例
 
-查看 `universal_parser.go` 获取完整示例，包括：
+查看 `parser.go` 获取完整示例，包括：
 - 结构体解析
 - Map 解析
 - Markdown 提取
 - JSON 修复
 - 文件读取
-- 多个 JSON 解析
 
 ## 安装
 

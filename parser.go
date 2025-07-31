@@ -21,7 +21,7 @@ func Parse[T any](input string) (T, error) {
 
 	// 2. 尝试提取 markdown 代码块中的 JSON
 	// 兼容 LLM 返回的 markdown 格式，如 ```json ... ```
-	extractedJSON := extractJSONFromMarkdown(input)
+	extractedJSON := extract(input)
 	if extractedJSON != "" {
 		if err := json.Unmarshal([]byte(extractedJSON), &result); err == nil {
 			return result, nil
@@ -30,7 +30,7 @@ func Parse[T any](input string) (T, error) {
 
 	// 3. 尝试修复格式错误的 JSON
 	// 兼容 LLM 返回的非标准 JSON，如缺少引号、单引号、尾逗号等
-	_, fixedResult := TryParseJSONObject(input)
+	_, fixedResult := tryParse(input)
 	if len(fixedResult) > 0 {
 		// 先转为标准 JSON 字符串，再反序列化为目标类型
 		jsonBytes, err := json.Marshal(fixedResult)
@@ -47,10 +47,10 @@ func Parse[T any](input string) (T, error) {
 	return result, fmt.Errorf("无法解析任何格式的 JSON")
 }
 
-// extractJSONFromMarkdown 从 markdown 文本中提取 JSON 内容
+// extract 从 markdown 文本中提取 JSON 内容
 // 支持 ```json ... ``` 和 ``` ... ``` 两种代码块格式
 // 只提取第一个代码块，若内容看起来像 JSON 则返回
-func extractJSONFromMarkdown(input string) string {
+func extract(input string) string {
 	// 匹配 ```json 和 ``` 之间的内容
 	pattern := regexp.MustCompile("```json\\s*\\n([\\s\\S]*?)\\n```")
 	matches := pattern.FindStringSubmatch(input)
@@ -69,10 +69,10 @@ func extractJSONFromMarkdown(input string) string {
 	return ""
 }
 
-// TryParseJSONObject 尝试修复和解析格式错误的 JSON 字符串
+// tryParse 尝试修复和解析格式错误的 JSON 字符串
 // 兼容 LLM 返回的非标准 JSON，自动修复常见问题
 // 返回 (修复后的 JSON 字符串, 解析后的 map)
-func TryParseJSONObject(input string) (string, map[string]interface{}) {
+func tryParse(input string) (string, map[string]interface{}) {
 	var result map[string]interface{}
 
 	// 1. 直接尝试标准解析
@@ -88,10 +88,10 @@ func TryParseJSONObject(input string) (string, map[string]interface{}) {
 	}
 
 	// 3. 清理常见格式问题（如多余括号、转义、换行等）
-	input = cleanJSONString(input)
+	input = clean(input)
 
 	// 4. 移除 markdown 代码块包裹
-	input = removeMarkdownFrame(input)
+	input = removeIllegalStr(input)
 
 	// 5. 再次尝试标准解析
 	if err := json.Unmarshal([]byte(input), &result); err == nil {
@@ -99,16 +99,16 @@ func TryParseJSONObject(input string) (string, map[string]interface{}) {
 	}
 
 	// 6. 最后尝试正则修复（如缺少引号、单引号、尾逗号等）
-	jsonInfo := repairJSON(input)
+	jsonInfo := repair(input)
 	if err := json.Unmarshal([]byte(jsonInfo), &result); err != nil {
 		return jsonInfo, make(map[string]interface{})
 	}
 	return jsonInfo, result
 }
 
-// cleanJSONString 清理常见的 JSON 格式问题
+// clean 清理常见的 JSON 格式问题
 // 包括多余括号、转义字符、换行、回车等
-func cleanJSONString(input string) string {
+func clean(input string) string {
 	replacements := map[string]string{
 		"{{":   "{",
 		"}}":   "}",
@@ -125,9 +125,9 @@ func cleanJSONString(input string) string {
 	return strings.TrimSpace(input)
 }
 
-// removeMarkdownFrame 移除 markdown 代码块包裹
+// removeIllegalStr 移除 markdown 代码块包裹
 // 兼容 LLM 返回的 ```json ... ``` 或 ``` ... ``` 格式
-func removeMarkdownFrame(input string) string {
+func removeIllegalStr(input string) string {
 	input = strings.TrimSpace(input)
 	if strings.HasPrefix(input, "```") {
 		input = input[3:]
@@ -141,9 +141,9 @@ func removeMarkdownFrame(input string) string {
 	return strings.TrimSpace(input)
 }
 
-// repairJSON 尝试修复格式错误的 JSON
+// repair 尝试修复格式错误的 JSON
 // 包括移除尾逗号、补引号、单引号转双引号、字符串值补引号等
-func repairJSON(jsonStr string) string {
+func repair(jsonStr string) string {
 	// 1. 移除尾逗号
 	re := regexp.MustCompile(`,\s*[}\]]`)
 	jsonStr = re.ReplaceAllString(jsonStr, "$1")
