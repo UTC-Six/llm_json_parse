@@ -1,55 +1,112 @@
-# JSON Parse Utilities
+# Universal JSON Parser
 
-This repository contains utilities for parsing and repairing JSON strings, originally written in Python and now also available in Go.
+A universal JSON parser for Go that can handle various JSON formats including:
+- Standard JSON
+- Markdown-wrapped JSON
+- Malformed JSON with automatic repair
 
-## Go Version
+## Features
 
-The Go implementation provides the same functionality as the Python version:
+- **Generic Support**: Use with any struct or `map[string]interface{}`
+- **Markdown Extraction**: Automatically extracts JSON from markdown code blocks
+- **JSON Repair**: Fixes common JSON formatting issues
+- **Multiple Formats**: Handles pure JSON, markdown JSON, and malformed JSON
+- **Type Safety**: Full type safety with Go generics
 
-### Functions
+## Quick Start
 
-#### `Parse(functionString string) (string, map[string]interface{})`
-
-Parses a function call string and converts it to JSON format.
-
-**Example:**
 ```go
-functionString := "tool_call(first_int={'title': 'First Int', 'type': 'integer'}, second_int={'title': 'Second Int', 'type': 'integer'})"
-astInfo, jsonResult := Parse(functionString)
+package main
+
+import (
+    "fmt"
+    "your-module/parser"
+)
+
+// Define your struct
+type User struct {
+    Name string `json:"name"`
+    Age  int    `json:"age"`
+}
+
+func main() {
+    // Parse standard JSON
+    jsonStr := `{"name": "Alice", "age": 30}`
+    user, err := Parse[User](jsonStr)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("User: %+v\n", user)
+    
+    // Parse markdown JSON
+    markdownStr := "```json\n{\"name\": \"Bob\", \"age\": 25}\n```"
+    user2, err := Parse[User](markdownStr)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("User: %+v\n", user2)
+    
+    // Parse malformed JSON
+    malformedStr := `{name: "Charlie", age: 35}`
+    user3, err := Parse[User](malformedStr)
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("User: %+v\n", user3)
+}
 ```
 
-#### `TryParseJSONObject(input string) (string, map[string]interface{})`
+## API Reference
 
-Cleans and formats JSON strings, attempting to repair malformed JSON.
+### Parse[T]
 
-**Example:**
+Parses JSON into any type T.
+
 ```go
-jsonString := `{"name": "test", "value": 123}`
-cleaned, result := TryParseJSONObject(jsonString)
+func Parse[T any](input string) (T, error)
 ```
 
-### Usage
+**Parameters:**
+- `input`: JSON string (can be pure JSON, markdown JSON, or malformed JSON)
 
-1. Make sure you have Go 1.21 or later installed
-2. Run the example:
-   ```bash
-   go run json_parse.go
+**Returns:**
+- Parsed object of type T
+- Error if parsing fails
+
+## Supported Formats
+
+1. **Standard JSON**
+   ```json
+   {"name": "value", "number": 123}
    ```
 
-### Features
+2. **Markdown JSON**
+   ```markdown
+   ```json
+   {"name": "value", "number": 123}
+   ```
+   ```
 
-- **AST-like parsing**: Converts function call strings to JSON format
-- **JSON repair**: Attempts to fix common JSON formatting issues
-- **Markdown frame removal**: Removes markdown code blocks from JSON strings
-- **Type inference**: Automatically detects and converts data types
+3. **Malformed JSON** (automatically repaired)
+   ```json
+   {name: value, number: 123}
+   ```
 
-### Differences from Python Version
+## Examples
 
-- Uses regex-based parsing instead of Python's `ast` module
-- Simplified JSON repair logic (you may want to use a more sophisticated JSON repair library for production use)
-- Go-style error handling and return values
-- No external dependencies beyond Go standard library
+See `parser.go` for complete examples including:
+- Struct parsing
+- Map parsing
+- Markdown extraction
+- JSON repair
+- File reading
 
-## Python Version
+## Installation
 
-The original Python implementation is also available and provides similar functionality using Python's `ast` module and the `json_repair` library.
+```bash
+go get github.com/your-username/universal-json-parser
+```
+
+## License
+
+MIT License
