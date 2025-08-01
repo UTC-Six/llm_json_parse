@@ -334,7 +334,8 @@ func TestParseAnswer(t *testing.T) {
 		},
 		{
 			trace: "7ffe08d2994902269892d8a457736ed4",
-			rawJSON: `{
+			rawJSON: " 响应的数据是: \n```json" +
+				`{
     "sugs": [
         {
             "id": "sug1",
@@ -350,7 +351,7 @@ func TestParseAnswer(t *testing.T) {
         }
     ],
     "synopsis": "通过叠加意象、强化比喻和引入时间静止的想象，使面部表情描写更具冲击力和画面感"
-}`,
+}` + "``` \n 对应的内容为",
 		},
 		{
 			trace: "23e36e1c68f9723c9266431c4af3aa65",
