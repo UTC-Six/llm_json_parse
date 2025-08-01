@@ -7,162 +7,340 @@ import (
 	"strings"
 )
 
-// Parse 通用 JSON 解析器，支持任意对象类型（结构体、map等）
-// 兼容标准 JSON、markdown 包裹的 JSON、格式错误的 JSON，并自动修复常见问题。
-// T 为目标类型，可以是结构体或 map[string]interface{}。
-func Parse[T any](input string) (T, error) {
+// Parse 解析 JSON 字符串到指定类型
+// 支持标准 JSON、markdown 代码块 JSON、以及格式错误的 JSON
+func Parse[T any](input string) (*T, error) {
+	if input == "" {
+		return nil, fmt.Errorf("输入字符串为空")
+	}
+
+	// 第一步：提取 JSON 内容
+	jsonContent, err := extractJSONContent(input)
+	if err != nil {
+		return nil, fmt.Errorf("提取 JSON 内容失败: %w", err)
+	}
+
+	// 第二步：修复 JSON 格式问题
+	fixedJSON, err := fixJSONFormat(jsonContent)
+	if err != nil {
+		return nil, fmt.Errorf("修复 JSON 格式失败: %w", err)
+	}
+
+	// 第三步：解析为对象
 	var result T
-
-	// 1. 尝试直接解析纯 JSON
-	// 适用于标准 JSON 格式，最快捷
-	if err := json.Unmarshal([]byte(input), &result); err == nil {
-		return result, nil
+	if err := json.Unmarshal([]byte(fixedJSON), &result); err != nil {
+		return nil, fmt.Errorf("JSON 解析失败: %w", err)
 	}
 
-	// 2. 尝试提取 markdown 代码块中的 JSON
-	// 兼容 LLM 返回的 markdown 格式，如 ```json ... ```
-	extractedJSON := extract(input)
-	if extractedJSON != "" {
-		if err := json.Unmarshal([]byte(extractedJSON), &result); err == nil {
-			return result, nil
-		}
-	}
-
-	// 3. 尝试修复格式错误的 JSON
-	// 兼容 LLM 返回的非标准 JSON，如缺少引号、单引号、尾逗号等
-	_, fixedResult := tryParse(input)
-	if len(fixedResult) > 0 {
-		// 先转为标准 JSON 字符串，再反序列化为目标类型
-		jsonBytes, err := json.Marshal(fixedResult)
-		if err != nil {
-			return result, fmt.Errorf("修复后的 JSON 序列化失败: %v", err)
-		}
-		if err := json.Unmarshal(jsonBytes, &result); err != nil {
-			return result, fmt.Errorf("修复后的 JSON 解析失败: %v", err)
-		}
-		return result, nil
-	}
-
-	// 4. 所有方式都失败，返回错误
-	return result, fmt.Errorf("无法解析任何格式的 JSON")
+	return &result, nil
 }
 
-// extract 从 markdown 文本中提取 JSON 内容
-// 支持 ```json ... ``` 和 ``` ... ``` 两种代码块格式
-// 只提取第一个代码块，若内容看起来像 JSON 则返回
-func extract(input string) string {
-	// 匹配 ```json 和 ``` 之间的内容
-	pattern := regexp.MustCompile("```json\\s*\\n([\\s\\S]*?)\\n```")
-	matches := pattern.FindStringSubmatch(input)
-	if len(matches) >= 2 {
-		return strings.TrimSpace(matches[1])
-	}
-	// 匹配普通 ``` 代码块
-	pattern2 := regexp.MustCompile("```\\s*\\n([\\s\\S]*?)\\n```")
-	matches2 := pattern2.FindStringSubmatch(input)
-	if len(matches2) >= 2 {
-		content := strings.TrimSpace(matches2[1])
-		if strings.HasPrefix(content, "{") && strings.HasSuffix(content, "}") {
-			return content
-		}
-	}
-	return ""
-}
-
-// tryParse 尝试修复和解析格式错误的 JSON 字符串
-// 兼容 LLM 返回的非标准 JSON，自动修复常见问题
-// 返回 (修复后的 JSON 字符串, 解析后的 map)
-func tryParse(input string) (string, map[string]interface{}) {
-	var result map[string]interface{}
-
-	// 1. 直接尝试标准解析
-	if err := json.Unmarshal([]byte(input), &result); err == nil {
-		return input, result
-	}
-
-	// 2. 尝试提取大括号内容
-	pattern := regexp.MustCompile(`\{(.*)\}`)
-	matches := pattern.FindStringSubmatch(input)
-	if len(matches) >= 2 {
-		input = "{" + matches[1] + "}"
-	}
-
-	// 3. 清理常见格式问题（如多余括号、转义、换行等）
-	input = clean(input)
-
-	// 4. 移除 markdown 代码块包裹
-	input = removeIllegalStr(input)
-
-	// 5. 再次尝试标准解析
-	if err := json.Unmarshal([]byte(input), &result); err == nil {
-		return input, result
-	}
-
-	// 6. 最后尝试正则修复（如缺少引号、单引号、尾逗号等）
-	jsonInfo := repair(input)
-	if err := json.Unmarshal([]byte(jsonInfo), &result); err != nil {
-		return jsonInfo, make(map[string]interface{})
-	}
-	return jsonInfo, result
-}
-
-// clean 清理常见的 JSON 格式问题
-// 包括多余括号、转义字符、换行、回车等
-func clean(input string) string {
-	replacements := map[string]string{
-		"{{":   "{",
-		"}}":   "}",
-		"\"[{": "[{",
-		"}]\"": "}]",
-		"\\n":  " ",
-		"\n":   " ",
-		"\r":   "",
-		"\\":   " ",
-	}
-	for old, new := range replacements {
-		input = strings.ReplaceAll(input, old, new)
-	}
-	return strings.TrimSpace(input)
-}
-
-// removeIllegalStr 移除 markdown 代码块包裹
-// 兼容 LLM 返回的 ```json ... ``` 或 ``` ... ``` 格式
-func removeIllegalStr(input string) string {
+// extractJSONContent 从输入中提取 JSON 内容
+// 支持标准 JSON 和 markdown 代码块格式
+func extractJSONContent(input string) (string, error) {
 	input = strings.TrimSpace(input)
-	if strings.HasPrefix(input, "```") {
-		input = input[3:]
+
+	// 尝试匹配 markdown 代码块
+	markdownPattern := regexp.MustCompile("```(?:json)?\\s*\\n?(?s:(.*?))\\n?```")
+	matches := markdownPattern.FindStringSubmatch(input)
+
+	if len(matches) > 1 {
+		// 找到 markdown 代码块，返回其中的内容
+		return strings.TrimSpace(matches[1]), nil
 	}
-	if strings.HasPrefix(input, "json") {
-		input = input[4:]
+
+	// 如果没有找到 markdown 代码块，检查是否是纯 JSON
+	if strings.HasPrefix(input, "{") || strings.HasPrefix(input, "[") {
+		return input, nil
 	}
-	if strings.HasSuffix(input, "```") {
-		input = input[:len(input)-3]
-	}
-	return strings.TrimSpace(input)
+
+	return "", fmt.Errorf("未找到有效的 JSON 内容")
 }
 
-// repair 尝试修复格式错误的 JSON
-// 包括移除尾逗号、补引号、单引号转双引号、字符串值补引号等
-func repair(jsonStr string) string {
-	// 1. 移除尾逗号
-	re := regexp.MustCompile(`,\s*[}\]]`)
-	jsonStr = re.ReplaceAllString(jsonStr, "$1")
-	// 2. 补全缺失的键名引号
-	re = regexp.MustCompile(`(\w+):`)
-	jsonStr = re.ReplaceAllString(jsonStr, `"$1":`)
-	// 3. 单引号转双引号
-	jsonStr = strings.ReplaceAll(jsonStr, "'", "\"")
-	// 4. 补全缺失的字符串值引号（不处理数字/布尔/null）
-	re = regexp.MustCompile(`:\s*([^"][^,}\]]*[^"\s,}\]])`)
-	jsonStr = re.ReplaceAllStringFunc(jsonStr, func(match string) string {
-		value := re.FindStringSubmatch(match)[1]
-		if value == "true" || value == "false" || value == "null" {
-			return match
+// fixJSONFormat 修复 JSON 格式问题
+func fixJSONFormat(jsonStr string) (string, error) {
+	if jsonStr == "" {
+		return "", fmt.Errorf("JSON 字符串为空")
+	}
+
+	// 先尝试直接解析，如果成功就直接返回
+	var temp interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &temp); err == nil {
+		return jsonStr, nil
+	}
+
+	// 如果解析失败，进行修复
+	fixed := jsonStr
+
+	// 1. 转换中文引号
+	fixed = convertChineseQuotes(fixed)
+
+	// 2. 修复缺失的引号
+	fixed = fixMissingQuotes(fixed)
+
+	// 3. 修复缺失的括号
+	fixed = fixMissingBrackets(fixed)
+
+	// 4. 修复尾随逗号
+	fixed = fixTrailingCommas(fixed)
+
+	// 5. 修复未转义的引号
+	fixed = fixUnescapedQuotes(fixed)
+
+	// 6. 修复单引号
+	fixed = fixSingleQuotes(fixed)
+
+	// 再次尝试解析
+	if err := json.Unmarshal([]byte(fixed), &temp); err != nil {
+		return "", fmt.Errorf("修复后仍无法解析 JSON: %w", err)
+	}
+
+	return fixed, nil
+}
+
+// convertChineseQuotes 将中文双引号转换为英文双引号
+func convertChineseQuotes(input string) string {
+	// 中文双引号：""（左双引号）和 ""（右双引号）
+	input = strings.ReplaceAll(input, "\u201c", `"`)
+	input = strings.ReplaceAll(input, "\u201d", `"`)
+	return input
+}
+
+// fixMissingQuotes 修复缺失的引号
+func fixMissingQuotes(input string) string {
+	lines := strings.Split(input, "\n")
+	var result []string
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
 		}
-		if strings.ContainsAny(value, "0123456789") && !strings.ContainsAny(value, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ") {
-			return match
+
+		// 修复 key 缺失引号的情况：key: value -> "key": value
+		colonIndex := strings.Index(line, ":")
+		if colonIndex > 0 {
+			key := strings.TrimSpace(line[:colonIndex])
+			value := strings.TrimSpace(line[colonIndex+1:])
+
+			// 如果 key 没有引号且不是数字或布尔值
+			if !strings.HasPrefix(key, `"`) && !strings.HasSuffix(key, `"`) {
+				// 检查是否是有效的 key（不包含特殊字符）
+				if isValidKey(key) {
+					key = `"` + key + `"`
+				}
+			}
+
+			// 如果 value 是字符串但没有引号
+			if value != "" && !strings.HasPrefix(value, `"`) && !strings.HasSuffix(value, `"`) {
+				// 检查是否是字符串值（不是数字、布尔值、null、对象、数组）
+				if isStringValue(value) {
+					value = `"` + value + `"`
+				}
+			}
+
+			line = key + ": " + value
 		}
-		return strings.Replace(match, value, `"`+value+`"`, 1)
-	})
-	return jsonStr
+
+		result = append(result, line)
+	}
+
+	return strings.Join(result, "\n")
+}
+
+// fixMissingBrackets 修复缺失的括号
+func fixMissingBrackets(input string) string {
+	// 统计括号数量
+	openBraces := strings.Count(input, "{")
+	closeBraces := strings.Count(input, "}")
+	openBrackets := strings.Count(input, "[")
+	closeBrackets := strings.Count(input, "]")
+
+	// 修复缺失的大括号
+	if openBraces > closeBraces {
+		input += strings.Repeat("}", openBraces-closeBraces)
+	}
+
+	// 修复缺失的方括号
+	if openBrackets > closeBrackets {
+		input += strings.Repeat("]", openBrackets-closeBrackets)
+	}
+
+	return input
+}
+
+// fixTrailingCommas 修复尾随逗号
+func fixTrailingCommas(input string) string {
+	// 移除对象和数组末尾的逗号
+	input = regexp.MustCompile(`,\s*([}\]])`).ReplaceAllString(input, "$1")
+	return input
+}
+
+// fixUnescapedQuotes 修复未转义的引号
+func fixUnescapedQuotes(input string) string {
+	var result strings.Builder
+	inString := false
+	escaped := false
+	pos := 0
+
+	for pos < len(input) {
+		char := input[pos]
+
+		if escaped {
+			result.WriteByte(char)
+			escaped = false
+			pos++
+			continue
+		}
+
+		if char == '\\' {
+			result.WriteByte(char)
+			escaped = true
+			pos++
+			continue
+		}
+
+		if char == '"' {
+			if !inString {
+				inString = true
+				result.WriteByte(char)
+			} else {
+				if isStringEndPosition(input, pos) {
+					inString = false
+					result.WriteByte(char)
+				} else {
+					result.WriteString(`\"`)
+				}
+			}
+			pos++
+			continue
+		}
+
+		result.WriteByte(char)
+		pos++
+	}
+
+	return result.String()
+}
+
+// fixSingleQuotes 修复单引号
+func fixSingleQuotes(input string) string {
+	// 将单引号替换为双引号，但需要处理转义
+	var result strings.Builder
+	inString := false
+	escaped := false
+	pos := 0
+
+	for pos < len(input) {
+		char := input[pos]
+
+		if escaped {
+			result.WriteByte(char)
+			escaped = false
+			pos++
+			continue
+		}
+
+		if char == '\\' {
+			result.WriteByte(char)
+			escaped = true
+			pos++
+			continue
+		}
+
+		if char == '\'' {
+			if !inString {
+				inString = true
+				result.WriteByte('"')
+			} else {
+				if isStringEndPosition(input, pos) {
+					inString = false
+					result.WriteByte('"')
+				} else {
+					result.WriteString(`\"`)
+				}
+			}
+			pos++
+			continue
+		}
+
+		result.WriteByte(char)
+		pos++
+	}
+
+	return result.String()
+}
+
+// isValidKey 检查是否是有效的 key
+func isValidKey(key string) bool {
+	// 简单的 key 验证：不包含特殊字符且不是数字开头
+	if len(key) == 0 {
+		return false
+	}
+
+	// 检查是否以数字开头
+	if key[0] >= '0' && key[0] <= '9' {
+		return false
+	}
+
+	// 检查是否包含特殊字符（除了字母、数字、下划线）
+	for _, char := range key {
+		if !((char >= 'a' && char <= 'z') ||
+			(char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') ||
+			char == '_') {
+			return false
+		}
+	}
+
+	return true
+}
+
+// isStringValue 检查是否是字符串值
+func isStringValue(value string) bool {
+	value = strings.TrimSpace(value)
+
+	// 如果包含中文字符，一定是字符串
+	for _, char := range value {
+		if char >= 0x4e00 && char <= 0x9fff {
+			return true
+		}
+	}
+
+	// 检查是否是数字
+	if regexp.MustCompile(`^-?\d+(\.\d+)?$`).MatchString(value) {
+		return false
+	}
+	// 检查是否是布尔值
+	if value == "true" || value == "false" {
+		return false
+	}
+	// 检查是否是 null
+	if value == "null" {
+		return false
+	}
+	// 检查是否是对象或数组
+	if strings.HasPrefix(value, "{") || strings.HasPrefix(value, "[") {
+		return false
+	}
+	return true
+}
+
+// isStringEndPosition 判断当前位置的引号是否是字符串结束
+func isStringEndPosition(input string, pos int) bool {
+	pos++
+	// 跳过空白字符
+	for pos < len(input) {
+		char := input[pos]
+		if char == ' ' || char == '\t' || char == '\n' || char == '\r' {
+			pos++
+			continue
+		}
+		break
+	}
+	if pos >= len(input) {
+		return true
+	}
+	nextChar := input[pos]
+	return nextChar == ',' || nextChar == ':' || nextChar == '}' || nextChar == ']'
 }
