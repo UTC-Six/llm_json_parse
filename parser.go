@@ -41,16 +41,15 @@ func extractJSONContent(input string) (string, error) {
 	input = strings.TrimSpace(input)
 
 	// 尝试匹配 markdown 代码块
+	// 支持两种格式：
+	// 1. ```json\n{...}\n```
+	// 2. ```json{...}```
 	markdownPattern := regexp.MustCompile("```(?:json)?\\s*\\n?(?s:(.*?))\\n?```")
 	matches := markdownPattern.FindStringSubmatch(input)
 
 	if len(matches) > 1 {
 		// 找到 markdown 代码块，返回其中的内容
-		content := strings.TrimSpace(matches[1])
-		// 如果内容以 { 开头，说明是有效的 JSON
-		if strings.HasPrefix(content, "{") || strings.HasPrefix(content, "[") {
-			return content, nil
-		}
+		return strings.TrimSpace(matches[1]), nil
 	}
 
 	// 如果没有找到 markdown 代码块，检查是否是纯 JSON
@@ -117,20 +116,21 @@ func convertChineseQuotes(input string) string {
 	var result strings.Builder
 	inString := false
 	escaped := false
+	runes := []rune(input)
 	pos := 0
 
-	for pos < len(input) {
-		char := input[pos]
+	for pos < len(runes) {
+		char := runes[pos]
 
 		if escaped {
-			result.WriteByte(char)
+			result.WriteRune(char)
 			escaped = false
 			pos++
 			continue
 		}
 
 		if char == '\\' {
-			result.WriteByte(char)
+			result.WriteRune(char)
 			escaped = true
 			pos++
 			continue
@@ -140,13 +140,13 @@ func convertChineseQuotes(input string) string {
 			if !inString {
 				// 字符串开始
 				inString = true
-				result.WriteByte(char)
+				result.WriteRune(char)
 			} else {
 				// 在字符串内部遇到引号，需要判断是否是字符串结束
-				if isStringEndPosition(input, pos) {
+				if isStringEndPositionRunes(runes, pos) {
 					// 字符串结束
 					inString = false
-					result.WriteByte(char)
+					result.WriteRune(char)
 				} else {
 					// 字符串内部的引号，需要转义
 					result.WriteString(`\"`)
@@ -156,7 +156,7 @@ func convertChineseQuotes(input string) string {
 			continue
 		}
 
-		result.WriteByte(char)
+		result.WriteRune(char)
 		pos++
 	}
 
@@ -244,20 +244,21 @@ func fixUnescapedQuotes(input string) string {
 	var result strings.Builder
 	inString := false
 	escaped := false
+	runes := []rune(input)
 	pos := 0
 
-	for pos < len(input) {
-		char := input[pos]
+	for pos < len(runes) {
+		char := runes[pos]
 
 		if escaped {
-			result.WriteByte(char)
+			result.WriteRune(char)
 			escaped = false
 			pos++
 			continue
 		}
 
 		if char == '\\' {
-			result.WriteByte(char)
+			result.WriteRune(char)
 			escaped = true
 			pos++
 			continue
@@ -266,11 +267,11 @@ func fixUnescapedQuotes(input string) string {
 		if char == '"' {
 			if !inString {
 				inString = true
-				result.WriteByte(char)
+				result.WriteRune(char)
 			} else {
-				if isStringEndPosition(input, pos) {
+				if isStringEndPositionRunes(runes, pos) {
 					inString = false
-					result.WriteByte(char)
+					result.WriteRune(char)
 				} else {
 					result.WriteString(`\"`)
 				}
@@ -279,7 +280,7 @@ func fixUnescapedQuotes(input string) string {
 			continue
 		}
 
-		result.WriteByte(char)
+		result.WriteRune(char)
 		pos++
 	}
 
@@ -288,46 +289,40 @@ func fixUnescapedQuotes(input string) string {
 
 // fixSingleQuotes 修复单引号
 func fixSingleQuotes(input string) string {
-	// 将单引号替换为双引号，但需要处理转义
+	// 在JSON中，单引号不需要转义，因为JSON字符串使用双引号作为分隔符
+	// 这个函数主要用于处理可能被错误转义的单引号
 	var result strings.Builder
 	inString := false
 	escaped := false
+	runes := []rune(input)
 	pos := 0
 
-	for pos < len(input) {
-		char := input[pos]
+	for pos < len(runes) {
+		char := runes[pos]
 
 		if escaped {
-			result.WriteByte(char)
+			result.WriteRune(char)
 			escaped = false
 			pos++
 			continue
 		}
 
 		if char == '\\' {
-			result.WriteByte(char)
+			result.WriteRune(char)
 			escaped = true
 			pos++
 			continue
 		}
 
-		if char == '\'' {
-			if !inString {
-				inString = true
-				result.WriteByte('"')
-			} else {
-				if isStringEndPosition(input, pos) {
-					inString = false
-					result.WriteByte('"')
-				} else {
-					result.WriteString(`\"`)
-				}
-			}
+		if char == '"' {
+			inString = !inString
+			result.WriteRune(char)
 			pos++
 			continue
 		}
 
-		result.WriteByte(char)
+		// 在JSON中，单引号不需要转义，直接保留
+		result.WriteRune(char)
 		pos++
 	}
 
@@ -410,5 +405,24 @@ func isStringEndPosition(input string, pos int) bool {
 		return true
 	}
 	nextChar := input[pos]
+	return nextChar == ',' || nextChar == ':' || nextChar == '}' || nextChar == ']'
+}
+
+// isStringEndPositionRunes 判断当前位置的引号是否是字符串结束
+func isStringEndPositionRunes(runes []rune, pos int) bool {
+	pos++
+	// 跳过空白字符
+	for pos < len(runes) {
+		char := runes[pos]
+		if char == ' ' || char == '\t' || char == '\n' || char == '\r' {
+			pos++
+			continue
+		}
+		break
+	}
+	if pos >= len(runes) {
+		return true
+	}
+	nextChar := runes[pos]
 	return nextChar == ',' || nextChar == ':' || nextChar == '}' || nextChar == ']'
 }
