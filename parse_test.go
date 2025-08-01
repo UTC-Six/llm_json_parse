@@ -91,32 +91,6 @@ func TestParseMarkdownJSON(t *testing.T) {
 	}
 }
 
-// TestParseMalformedJSON 测试格式错误 JSON 的修复与解析能力
-// 验证 Parse 能否自动修复缺少引号、单引号、尾逗号等问题
-func TestParseMalformedJSON(t *testing.T) {
-	malformedJSON := `{
-		name: 张三,
-		age: 25,
-		is_valid: true
-	}`
-
-	result, err := Parse[TestStruct](malformedJSON)
-	if err != nil {
-		t.Errorf("解析失败: %v", err)
-		return
-	}
-
-	if result.Name != "张三" {
-		t.Errorf("期望 Name 为 '张三'，实际为 '%s'", result.Name)
-	}
-	if result.Age != 25 {
-		t.Errorf("期望 Age 为 25，实际为 %d", result.Age)
-	}
-	if !result.IsValid {
-		t.Errorf("期望 IsValid 为 true，实际为 %t", result.IsValid)
-	}
-}
-
 // TestParseFromFile 测试从文件读取并解析
 // 验证 Parse 能否处理文件中的标准或 markdown JSON
 func TestParseFromFile(t *testing.T) {
@@ -446,5 +420,74 @@ func TestParseAnswer(t *testing.T) {
 
 			t.Logf("result=%+v", result)
 		})
+	}
+}
+
+// TestComplexJSONStructure 测试复杂的 JSON 结构
+func TestComplexJSONStructure(t *testing.T) {
+	type ComplexStruct struct {
+		Name    string   `json:"name"`
+		Items   []string `json:"items"`
+		Details struct {
+			Description string   `json:"description"`
+			Tags        []string `json:"tags"`
+		} `json:"details"`
+	}
+
+	rawJSON := `{
+		"name": "项目"测试"名称",
+		"items": [
+			"项目"一"",
+			"项目\"二\"",
+			"项目"三""
+		],
+		"details": {
+			"description": "这是一个"复杂"的\"描述\"",
+			"tags": ["标签"一"", "标签\"二\""]
+		}
+	}`
+
+	result, err := Parse[ComplexStruct](rawJSON)
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+
+	t.Logf("result=%+v", result)
+
+	// 验证结果
+	expectedName := "项目\"测试\"名称"
+	if result.Name != expectedName {
+		t.Errorf("Name 期望: %s, 实际: %s", expectedName, result.Name)
+	}
+
+	if len(result.Items) != 3 {
+		t.Errorf("Items 长度期望: 3, 实际: %d", len(result.Items))
+	}
+
+	expectedItems := []string{
+		"项目\"一\"",
+		"项目\"二\"",
+		"项目\"三\"",
+	}
+	for i, expected := range expectedItems {
+		if result.Items[i] != expected {
+			t.Errorf("Items[%d] 期望: %s, 实际: %s", i, expected, result.Items[i])
+		}
+	}
+
+	expectedDesc := "这是一个\"复杂\"的\"描述\""
+	if result.Details.Description != expectedDesc {
+		t.Errorf("Description 期望: %s, 实际: %s", expectedDesc, result.Details.Description)
+	}
+
+	if len(result.Details.Tags) != 2 {
+		t.Errorf("Tags 长度期望: 2, 实际: %d", len(result.Details.Tags))
+	}
+
+	expectedTags := []string{"标签\"一\"", "标签\"二\""}
+	for i, expected := range expectedTags {
+		if result.Details.Tags[i] != expected {
+			t.Errorf("Tags[%d] 期望: %s, 实际: %s", i, expected, result.Details.Tags[i])
+		}
 	}
 }

@@ -46,7 +46,11 @@ func extractJSONContent(input string) (string, error) {
 
 	if len(matches) > 1 {
 		// 找到 markdown 代码块，返回其中的内容
-		return strings.TrimSpace(matches[1]), nil
+		content := strings.TrimSpace(matches[1])
+		// 如果内容以 { 开头，说明是有效的 JSON
+		if strings.HasPrefix(content, "{") || strings.HasPrefix(content, "[") {
+			return content, nil
+		}
 	}
 
 	// 如果没有找到 markdown 代码块，检查是否是纯 JSON
@@ -103,7 +107,60 @@ func convertChineseQuotes(input string) string {
 	// 中文双引号：""（左双引号）和 ""（右双引号）
 	input = strings.ReplaceAll(input, "\u201c", `"`)
 	input = strings.ReplaceAll(input, "\u201d", `"`)
-	return input
+
+	// 中文单引号：''（左单引号）和 ''（右单引号）
+	input = strings.ReplaceAll(input, "\u2018", `'`)
+	input = strings.ReplaceAll(input, "\u2019", `'`)
+
+	// 智能处理字符串中的中文引号转义
+	// 使用状态机来正确处理引号
+	var result strings.Builder
+	inString := false
+	escaped := false
+	pos := 0
+
+	for pos < len(input) {
+		char := input[pos]
+
+		if escaped {
+			result.WriteByte(char)
+			escaped = false
+			pos++
+			continue
+		}
+
+		if char == '\\' {
+			result.WriteByte(char)
+			escaped = true
+			pos++
+			continue
+		}
+
+		if char == '"' {
+			if !inString {
+				// 字符串开始
+				inString = true
+				result.WriteByte(char)
+			} else {
+				// 在字符串内部遇到引号，需要判断是否是字符串结束
+				if isStringEndPosition(input, pos) {
+					// 字符串结束
+					inString = false
+					result.WriteByte(char)
+				} else {
+					// 字符串内部的引号，需要转义
+					result.WriteString(`\"`)
+				}
+			}
+			pos++
+			continue
+		}
+
+		result.WriteByte(char)
+		pos++
+	}
+
+	return result.String()
 }
 
 // fixMissingQuotes 修复缺失的引号
@@ -131,10 +188,10 @@ func fixMissingQuotes(input string) string {
 				}
 			}
 
-			// 如果 value 是字符串但没有引号
+			// 如果 value 是字符串但没有引号，且不是数组或对象
 			if value != "" && !strings.HasPrefix(value, `"`) && !strings.HasSuffix(value, `"`) {
 				// 检查是否是字符串值（不是数字、布尔值、null、对象、数组）
-				if isStringValue(value) {
+				if isStringValue(value) && !isArrayOrObject(value) {
 					value = `"` + value + `"`
 				}
 			}
@@ -146,6 +203,12 @@ func fixMissingQuotes(input string) string {
 	}
 
 	return strings.Join(result, "\n")
+}
+
+// isArrayOrObject 检查是否是数组或对象
+func isArrayOrObject(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "[") || strings.HasPrefix(value, "{")
 }
 
 // fixMissingBrackets 修复缺失的括号
@@ -321,6 +384,11 @@ func isStringValue(value string) bool {
 	}
 	// 检查是否是对象或数组
 	if strings.HasPrefix(value, "{") || strings.HasPrefix(value, "[") {
+		return false
+	}
+	// 检查是否已经是有效的 JSON 数组或对象（包含引号）
+	if (strings.HasPrefix(value, `"`) && strings.Contains(value, `[`) && strings.Contains(value, `]`)) ||
+		(strings.HasPrefix(value, `"`) && strings.Contains(value, `{`) && strings.Contains(value, `}`)) {
 		return false
 	}
 	return true
